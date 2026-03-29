@@ -30,13 +30,17 @@ const SPECIAL_ENTRIES = [" ", ".", "-", "/", ":"].map((value) => ({
 const COLOR_ENTRIES = [
   { key: "color:amber", kind: "color", label: "Amber", swatch: "#f0b352" },
   { key: "color:red", kind: "color", label: "Red", swatch: "#d8573c" },
+  { key: "color:crimson", kind: "color", label: "Crimson", swatch: "#cc0033" },
   { key: "color:orange", kind: "color", label: "Orange", swatch: "#e58a3a" },
+  { key: "color:khaki", kind: "color", label: "Khaki", swatch: "#f0e68c" },
   { key: "color:yellow", kind: "color", label: "Yellow", swatch: "#d7bf47" },
   { key: "color:lime", kind: "color", label: "Lime", swatch: "#99c24d" },
   { key: "color:green", kind: "color", label: "Green", swatch: "#4a9a62" },
   { key: "color:teal", kind: "color", label: "Teal", swatch: "#3b8d8d" },
   { key: "color:blue", kind: "color", label: "Blue", swatch: "#4676c7" },
   { key: "color:violet", kind: "color", label: "Violet", swatch: "#7759b5" },
+  { key: "color:magenta", kind: "color", label: "Magenta", swatch: "#d100b8" },
+  { key: "color:gray", kind: "color", label: "Gray", swatch: "#666666" },
   { key: "color:white", kind: "color", label: "White", swatch: "#f3efe4" },
 ];
 

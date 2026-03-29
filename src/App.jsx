@@ -10,6 +10,7 @@ TRACK 4 {GREEN}`;
 const BOARD_PAGE = "board";
 const MUNI_PAGE = "muni-eta";
 const MUNI_FLAP_PAGE = "muni-flap";
+const MUNI_SWATCH_DEMO_PAGE = "muni-swatch-demo";
 const DEFAULT_STOP_CODE = "17360";
 const SAVED_MUNI_STOPS_KEY = "muni-split-flap-stops";
 const SAVED_MUNI_BOARD_ROWS_KEY = "muni-split-flap-rows";
@@ -25,23 +26,46 @@ const MUNI_PROXY_BASE = (import.meta.env.VITE_MUNI_API_BASE || "/api/muni").repl
 );
 const POLL_INTERVAL_MS = 30_000;
 const TRAIN_ROUTE_IDS = new Set(["J", "K", "L", "M", "N", "S", "T"]);
+const DEMO_ROUTE_ORDER = ["E", "F", "J", "K", "L", "M", "N", "S", "T", "VAN NESS BRT"];
 const ROUTE_SWATCHES = {
+  E: "gray",
+  F: "khaki",
   J: "orange",
   K: "blue",
   L: "violet",
   M: "green",
-  N: "amber",
-  S: "white",
+  N: "blue",
+  S: "yellow",
   T: "red",
+  "VAN NESS BRT": "crimson",
 };
+const AVAILABLE_SWATCHES = [
+  "amber",
+  "red",
+  "crimson",
+  "orange",
+  "khaki",
+  "yellow",
+  "lime",
+  "green",
+  "teal",
+  "blue",
+  "violet",
+  "magenta",
+  "gray",
+  "white",
+];
 const ROUTE_COLORS = {
-  J: { routeColor: "#f28522", routeTextColor: "#111111" },
-  K: { routeColor: "#2979c9", routeTextColor: "#ffffff" },
-  L: { routeColor: "#8f5bbf", routeTextColor: "#ffffff" },
-  M: { routeColor: "#2f8d46", routeTextColor: "#ffffff" },
-  N: { routeColor: "#f2c037", routeTextColor: "#111111" },
-  S: { routeColor: "#f5f5f5", routeTextColor: "#111111" },
-  T: { routeColor: "#c73d4a", routeTextColor: "#ffffff" },
+  E: { routeColor: "#666666", routeTextColor: "#ffffff" },
+  F: { routeColor: "#f0e68c", routeTextColor: "#111111" },
+  J: { routeColor: "#e18813", routeTextColor: "#111111" },
+  K: { routeColor: "#549dbf", routeTextColor: "#ffffff" },
+  L: { routeColor: "#932290", routeTextColor: "#ffffff" },
+  M: { routeColor: "#008851", routeTextColor: "#ffffff" },
+  N: { routeColor: "#004988", routeTextColor: "#ffffff" },
+  S: { routeColor: "#ffcc00", routeTextColor: "#111111" },
+  T: { routeColor: "#d40843", routeTextColor: "#ffffff" },
+  "VAN NESS BRT": { routeColor: "#cc0033", routeTextColor: "#ffffff" },
 };
 
 function clampInteger(value, fallback) {
@@ -105,7 +129,7 @@ function sanitizeFlapText(value) {
 function getPageFromHash(hash) {
   const page = hash.replace(/^#/, "");
 
-  if (page === MUNI_PAGE || page === MUNI_FLAP_PAGE) {
+  if (page === MUNI_PAGE || page === MUNI_FLAP_PAGE || page === MUNI_SWATCH_DEMO_PAGE) {
     return page;
   }
 
@@ -343,11 +367,7 @@ function groupTripsByRoute(trips) {
         .slice(0, MAX_CONDENSED_ARRIVALS)
         .map((trip) => (trip.minutes === 0 ? "NOW" : String(trip.minutes))),
     }))
-    .sort((left, right) => {
-      const leftFirst = left.minutes[0] === "NOW" ? 0 : Number(left.minutes[0]);
-      const rightFirst = right.minutes[0] === "NOW" ? 0 : Number(right.minutes[0]);
-      return leftFirst - rightFirst;
-    });
+    .sort((left, right) => left.routeId.localeCompare(right.routeId));
 }
 
 function buildCondensedFlapTripRows(trips) {
@@ -377,6 +397,70 @@ function buildCondensedFlapTripRows(trips) {
       minutesText,
       " MIN",
     ];
+  });
+}
+
+function buildDemoCondensedTripRows() {
+  const fakeTrips = [
+    { routeId: "E", minutes: 5 },
+    { routeId: "E", minutes: 16 },
+    { routeId: "E", minutes: 28 },
+    { routeId: "F", minutes: 7 },
+    { routeId: "F", minutes: 19 },
+    { routeId: "F", minutes: 33 },
+    { routeId: "J", minutes: 3 },
+    { routeId: "J", minutes: 12 },
+    { routeId: "J", minutes: 20 },
+    { routeId: "K", minutes: 4 },
+    { routeId: "K", minutes: 15 },
+    { routeId: "K", minutes: 24 },
+    { routeId: "L", minutes: 10 },
+    { routeId: "L", minutes: 24 },
+    { routeId: "L", minutes: 35 },
+    { routeId: "M", minutes: 15 },
+    { routeId: "M", minutes: 32 },
+    { routeId: "M", minutes: 42 },
+    { routeId: "N", minutes: 1 },
+    { routeId: "N", minutes: 8 },
+    { routeId: "N", minutes: 18 },
+    { routeId: "S", minutes: 6 },
+    { routeId: "S", minutes: 17 },
+    { routeId: "S", minutes: 28 },
+    { routeId: "T", minutes: 2 },
+    { routeId: "T", minutes: 11 },
+    { routeId: "T", minutes: 21 },
+    { routeId: "VAN NESS BRT", minutes: 9 },
+    { routeId: "VAN NESS BRT", minutes: 18 },
+    { routeId: "VAN NESS BRT", minutes: 27 },
+  ];
+
+  const rowByRoute = new Map(
+    buildCondensedFlapTripRows(fakeTrips).map((row) => [row[2], row]),
+  );
+
+  return DEMO_ROUTE_ORDER.map((routeId) => rowByRoute.get(routeId)).filter(Boolean);
+}
+
+function buildSwatchCatalogPages({ rows, columns }) {
+  const swatchesPerPage = Math.max(rows - 2, 1);
+  const swatchChunks = chunkItems(AVAILABLE_SWATCHES, swatchesPerPage);
+
+  return swatchChunks.map((pageSwatches, pageIndex) => {
+    const pageRows = [
+      { left: "AVAILABLE SWATCHES", right: "" },
+      pageIndex === 0 ? "ONE COLOR SAMPLE PER ROW" : `SWATCH PAGE ${pageIndex + 1}`,
+      ...pageSwatches.map((swatchName) => [{ swatch: swatchName }, " ", swatchName]),
+    ];
+
+    while (pageRows.length < rows) {
+      pageRows.push("");
+    }
+
+    return pageRows.map((row) =>
+      row && typeof row === "object" && !Array.isArray(row)
+        ? buildAlignedBoardRow({ ...row, columns })
+        : row,
+    );
   });
 }
 
@@ -1191,10 +1275,72 @@ function MuniSplitFlapPage() {
   );
 }
 
+function MuniSwatchDemoPage() {
+  const [pageIndex, setPageIndex] = useState(0);
+  const demoPages = useMemo(
+    () => {
+      const lineDemoPage = [
+        { left: "MUNI ROUTE COLOR DEMO", right: "" },
+        "FAKE ARRIVALS FOR COLOR CHECK",
+        ...buildDemoCondensedTripRows(),
+      ].map((row) =>
+        row && typeof row === "object" && !Array.isArray(row)
+          ? buildAlignedBoardRow({ ...row, columns: 30 })
+          : row,
+      );
+
+      return [lineDemoPage, ...buildSwatchCatalogPages({ rows: 9, columns: 30 })];
+    },
+    [],
+  );
+
+  return (
+    <div className="muni-board-screen">
+      <div className="muni-board-shell">
+        <div className="board-stage muni-board-stage">
+          <div className="board-stage-frame">
+            <SplitFlapDisplay
+              rows={9}
+              columns={30}
+              pages={demoPages}
+              autoplay
+              autoplayIntervalMs={8_000}
+              page={pageIndex}
+              onPageChange={setPageIndex}
+              stepMs={42}
+              fit="width"
+              label="Muni Metro line swatch demo"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const [page, setPage] = useState(() =>
+    typeof window === "undefined" ? MUNI_FLAP_PAGE : getPageFromHash(window.location.hash),
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const syncPageFromHash = () => {
+      setPage(getPageFromHash(window.location.hash));
+    };
+
+    syncPageFromHash();
+    window.addEventListener("hashchange", syncPageFromHash);
+
+    return () => window.removeEventListener("hashchange", syncPageFromHash);
+  }, []);
+
   return (
     <main className="app-shell">
-      <MuniSplitFlapPage />
+      {page === MUNI_SWATCH_DEMO_PAGE ? <MuniSwatchDemoPage /> : <MuniSplitFlapPage />}
     </main>
   );
 }
