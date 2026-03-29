@@ -16,7 +16,10 @@ const SAVED_MUNI_BOARD_ROWS_KEY = "muni-split-flap-rows";
 const SAVED_MUNI_BOARD_COLUMNS_KEY = "muni-split-flap-columns";
 const DEFAULT_BOARD_ROWS = 7;
 const DEFAULT_BOARD_COLUMNS = 30;
-const MUNI_PROXY_BASE = "/api/muni";
+const MUNI_PROXY_BASE = (import.meta.env.VITE_MUNI_API_BASE || "/api/muni").replace(
+  /\/+$/,
+  "",
+);
 const MUNI_PUBLIC_KEY = "0be8ebd0284ce712a63f29dcaf7798c4";
 const POLL_INTERVAL_MS = 30_000;
 const TRAIN_ROUTE_IDS = new Set(["J", "K", "L", "M", "N", "S", "T"]);

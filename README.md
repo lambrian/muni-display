@@ -1,223 +1,51 @@
-# Transit Flipboard
+# Muni Display
 
-A React split-flap board component with row/column layout, automatic paging, and color swatch cells.
+A React + Vite split-flap board that shows live San Francisco Muni Metro ETAs by stop number.
 
-## Component
-
-```jsx
-import { SplitFlapDisplay } from "./src/components/SplitFlapDisplay";
-```
-
-## Quick Start
-
-```jsx
-<SplitFlapDisplay
-  rows={3}
-  columns={24}
-  value={`SEATTLE 10:42
-LOS ANGELES 11:05
-OAKLAND 13:10`}
-/>
-```
-
-## Props
-
-### `columns`
-
-```ts
-columns: number
-```
-
-Number of flap cells per row.
-
-### `rows`
-
-```ts
-rows?: number
-```
-
-Defaults to `1`.
-
-### `value`
-
-```ts
-value?: string | string[]
-```
-
-Supports:
-- a single string
-- a multiline string using `\n`
-- an array of row strings
-
-Unsupported characters render as blank cells.
-
-### `rowsData`
-
-```ts
-rowsData?: CellValue[][]
-```
-
-Structured row input for a single board page.
-
-Example:
-
-```jsx
-<SplitFlapDisplay
-  rows={2}
-  columns={16}
-  rowsData={[
-    ["TRACK", " ", { swatch: "amber" }],
-    ["READY", " ", { swatch: "green" }],
-  ]}
-/>
-```
-
-### `pages`
-
-```ts
-pages?: Array<string | string[] | CellValue[][]>
-```
-
-Explicit page input. When supplied, `pages` takes precedence over `value` and `rowsData`.
-
-### `paginate`
-
-```ts
-paginate?: boolean
-```
-
-Defaults to `true`.
-
-If enabled, extra rows become additional pages. If disabled, extra rows are clipped.
-
-### `page`
-
-```ts
-page?: number
-```
-
-Controlled page index.
-
-### `defaultPage`
-
-```ts
-defaultPage?: number
-```
-
-Initial page for uncontrolled paging.
-
-### `onPageChange`
-
-```ts
-onPageChange?: (page: number) => void
-```
-
-Called when autoplay or app state changes the active page.
-
-### `autoplay`
-
-```ts
-autoplay?: boolean
-```
-
-Defaults to `false`.
-
-Automatically rotates pages after the current flip sequence settles.
-
-### `autoplayIntervalMs`
-
-```ts
-autoplayIntervalMs?: number
-```
-
-Extra delay after a page transition completes.
-
-### `stepMs`
-
-```ts
-stepMs?: number
-```
-
-Defaults to `40`.
-
-Controls the speed of each flap step.
-
-### `align`
-
-```ts
-align?: "left" | "right"
-```
-
-Defaults to `"left"`.
-
-### `fit`
-
-```ts
-fit?: "width" | "none"
-```
-
-Defaults to `"width"`.
-
-- `"width"` shrinks cells to fit available horizontal space when possible
-- `"none"` preserves natural size and allows overflow
-
-### `label`
-
-```ts
-label?: string
-```
-
-Accessible label for the board.
-
-### `className`
-
-```ts
-className?: string
-```
-
-### `style`
-
-```ts
-style?: React.CSSProperties
-```
-
-## CellValue
-
-```ts
-type CellValue =
-  | string
-  | { char: string }
-  | { swatch: SwatchName }
-  | { blank: true };
-```
-
-## Swatch Names
-
-Supported swatches:
-
-- `amber`
-- `red`
-- `orange`
-- `yellow`
-- `lime`
-- `green`
-- `teal`
-- `blue`
-- `violet`
-- `white`
-
-## Behavior
-
-- The board always renders exactly `rows * columns` cells per page.
-- The board never wraps.
-- Long lines are clipped.
-- Unsupported characters display as blanks.
-- Paging is row-based.
-- Flap animation advances through the full internal sequence, including swatches.
-
-## Development
+## Local Development
 
 ```bash
 npm install
 npm run dev
 ```
+
+The app uses the local Vite proxy during development, so no extra setup is needed for live ETA requests.
+
+## GitHub Pages
+
+This repo is configured to deploy to GitHub Pages from the `main` branch with a GitHub Actions workflow.
+
+### One Required Production Setting
+
+GitHub Pages is static hosting, and the live Muni API does not send browser CORS headers. That means the production site needs a proxy URL that the browser can call directly.
+
+Set a repository variable named `VITE_MUNI_API_BASE` in GitHub:
+
+```text
+https://your-proxy.example.com/api/muni
+```
+
+The frontend will build requests like:
+
+```text
+${VITE_MUNI_API_BASE}/stopcodes/17360/predictions?key=...
+```
+
+### Publish Steps
+
+1. In GitHub, open `Settings` -> `Pages`.
+2. Set `Source` to `GitHub Actions`.
+3. In `Settings` -> `Secrets and variables` -> `Actions`, add repository variable `VITE_MUNI_API_BASE`.
+4. Push to `main`.
+
+The workflow in `.github/workflows/deploy.yml` will build and publish the site to:
+
+```text
+https://lambrian.github.io/muni-display/
+```
+
+## Notes
+
+- Local development uses `/api/muni` through the Vite dev server proxy.
+- GitHub Pages builds automatically use the repository base path (`/muni-display/`).
+- If `VITE_MUNI_API_BASE` is missing in GitHub Actions, the deploy workflow fails intentionally so the published site does not ship with broken live data.
