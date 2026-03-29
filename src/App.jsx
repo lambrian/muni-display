@@ -14,8 +14,11 @@ const DEFAULT_STOP_CODE = "17360";
 const SAVED_MUNI_STOPS_KEY = "muni-split-flap-stops";
 const SAVED_MUNI_BOARD_ROWS_KEY = "muni-split-flap-rows";
 const SAVED_MUNI_BOARD_COLUMNS_KEY = "muni-split-flap-columns";
+const SAVED_MUNI_BOARD_VIEW_KEY = "muni-split-flap-view";
 const DEFAULT_BOARD_ROWS = 7;
 const DEFAULT_BOARD_COLUMNS = 30;
+const DEFAULT_BOARD_VIEW = "standard";
+const MAX_CONDENSED_ARRIVALS = 4;
 const MUNI_PROXY_BASE = (import.meta.env.VITE_MUNI_API_BASE || "/api/muni").replace(
   /\/+$/,
   "",
@@ -139,6 +142,10 @@ function parseStoredStopCodes(value) {
 function parseStoredInteger(value, fallback) {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseStoredBoardView(value) {
+  return value === "condensed" ? "condensed" : DEFAULT_BOARD_VIEW;
 }
 
 function isTrainPrediction(group) {
@@ -313,7 +320,67 @@ function buildFlapTripRow(trip) {
   ];
 }
 
-function buildStopFlapPages({ stopResult, stopCode, rows }) {
+function groupTripsByRoute(trips) {
+  const groupedTrips = new Map();
+
+  trips.forEach((trip) => {
+    const existingRoute = groupedTrips.get(trip.routeId);
+
+    if (existingRoute) {
+      existingRoute.push(trip);
+      return;
+    }
+
+    groupedTrips.set(trip.routeId, [trip]);
+  });
+
+  return Array.from(groupedTrips.entries())
+    .map(([routeId, routeTrips]) => ({
+      routeId,
+      minutes: routeTrips
+        .slice()
+        .sort((left, right) => left.minutes - right.minutes)
+        .slice(0, MAX_CONDENSED_ARRIVALS)
+        .map((trip) => (trip.minutes === 0 ? "NOW" : String(trip.minutes))),
+    }))
+    .sort((left, right) => {
+      const leftFirst = left.minutes[0] === "NOW" ? 0 : Number(left.minutes[0]);
+      const rightFirst = right.minutes[0] === "NOW" ? 0 : Number(right.minutes[0]);
+      return leftFirst - rightFirst;
+    });
+}
+
+function buildCondensedFlapTripRows(trips) {
+  const groupedTrips = groupTripsByRoute(trips);
+  const etaColumnWidths = Array.from({ length: MAX_CONDENSED_ARRIVALS }, (_, etaIndex) =>
+    groupedTrips.reduce((widest, tripGroup) => {
+      const etaValue = tripGroup.minutes[etaIndex] ?? "";
+      return Math.max(widest, etaValue.length);
+    }, 0),
+  );
+
+  return groupedTrips.map((tripGroup) => {
+    const minutesText = etaColumnWidths
+      .map((columnWidth, etaIndex) => {
+        const etaValue = tripGroup.minutes[etaIndex] ?? "";
+        const separator = etaIndex === 0 ? "" : " ";
+        return `${separator}${etaValue.padStart(columnWidth, " ")}`;
+      })
+      .join("")
+      .trimEnd();
+
+    return [
+      { swatch: ROUTE_SWATCHES[tripGroup.routeId] ?? "amber" },
+      " ",
+      tripGroup.routeId,
+      " ",
+      minutesText,
+      " MIN",
+    ];
+  });
+}
+
+function buildStopFlapPages({ stopResult, stopCode, rows, boardView }) {
   const headerTime = formatBoardTime(stopResult?.fetchedAt);
   const headerPrefix = `${headerTime} ${stopCode}`.trim();
   const stopName = sanitizeFlapText(stopResult?.stop?.name ?? `STOP ${stopCode}`);
@@ -342,14 +409,18 @@ function buildStopFlapPages({ stopResult, stopCode, rows }) {
     )];
   }
 
-  const tripPages = chunkItems(stopResult.trips, tripRowsPerPage);
+  const tripRows =
+    boardView === "condensed"
+      ? buildCondensedFlapTripRows(stopResult.trips)
+      : stopResult.trips.map((trip) => buildFlapTripRow(trip));
+  const tripPages = chunkItems(tripRows, tripRowsPerPage);
 
   return tripPages.map((pageTrips, pageIndex) => {
     const headerRow = headerPrefix;
     const pageRows = [
       { left: headerRow, right: "" },
       pageIndex === 0 ? stopName : `PAGE ${pageIndex + 1} OF ${tripPages.length}`,
-      ...pageTrips.map((trip) => buildFlapTripRow(trip)),
+      ...pageTrips,
     ];
 
     while (pageRows.length < rows) {
@@ -360,12 +431,13 @@ function buildStopFlapPages({ stopResult, stopCode, rows }) {
   });
 }
 
-function buildMuniFlapPages({ stopCodes, stopResults, rows }) {
+function buildMuniFlapPages({ stopCodes, stopResults, rows, boardView }) {
   return stopCodes.flatMap((stopCode) =>
     buildStopFlapPages({
       stopResult: stopResults[stopCode],
       stopCode,
       rows,
+      boardView,
     }),
   );
 }
@@ -765,6 +837,7 @@ function MuniStatusBar({
 function MuniControlModal({
   boardColumns,
   boardRows,
+  boardView,
   inputStopCode,
   isOpen,
   isRefreshing,
@@ -774,6 +847,7 @@ function MuniControlModal({
   removeStopCode,
   setBoardColumns,
   setBoardRows,
+  setBoardView,
   setInputStopCode,
   status,
   stopCodes,
@@ -847,6 +921,19 @@ function MuniControlModal({
                 setBoardColumns(clampInteger(event.target.value, DEFAULT_BOARD_COLUMNS));
               }}
             />
+          </label>
+
+          <label className="control-field">
+            <span>View</span>
+            <select
+              value={boardView}
+              onChange={(event) => {
+                setBoardView(event.target.value);
+              }}
+            >
+              <option value="standard">Standard</option>
+              <option value="condensed">Condensed</option>
+            </select>
           </label>
         </div>
 
@@ -988,10 +1075,23 @@ function MuniSplitFlapPage() {
   });
   const [pageIndex, setPageIndex] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [boardView, setBoardView] = useState(() => {
+    if (typeof window === "undefined") {
+      return DEFAULT_BOARD_VIEW;
+    }
+
+    return parseStoredBoardView(window.localStorage.getItem(SAVED_MUNI_BOARD_VIEW_KEY));
+  });
 
   const splitFlapPages = useMemo(
-    () => buildMuniFlapPages({ stopCodes, stopResults: resultsByStop, rows: boardRows }),
-    [boardRows, resultsByStop, stopCodes],
+    () =>
+      buildMuniFlapPages({
+        stopCodes,
+        stopResults: resultsByStop,
+        rows: boardRows,
+        boardView,
+      }),
+    [boardRows, boardView, resultsByStop, stopCodes],
   );
   const boardPages = useMemo(
     () =>
@@ -1030,6 +1130,10 @@ function MuniSplitFlapPage() {
     window.localStorage.setItem(SAVED_MUNI_BOARD_COLUMNS_KEY, String(boardColumns));
   }, [boardColumns]);
 
+  useEffect(() => {
+    window.localStorage.setItem(SAVED_MUNI_BOARD_VIEW_KEY, boardView);
+  }, [boardView]);
+
   return (
     <div className="muni-board-screen">
       {error ? <p className="muni-error muni-error-floating">{error}</p> : null}
@@ -1067,6 +1171,7 @@ function MuniSplitFlapPage() {
       <MuniControlModal
         boardColumns={boardColumns}
         boardRows={boardRows}
+        boardView={boardView}
         inputStopCode={inputStopCode}
         isOpen={isModalOpen}
         isRefreshing={isRefreshing}
@@ -1076,6 +1181,7 @@ function MuniSplitFlapPage() {
         removeStopCode={removeStopCode}
         setBoardColumns={setBoardColumns}
         setBoardRows={setBoardRows}
+        setBoardView={setBoardView}
         setInputStopCode={setInputStopCode}
         status={status}
         stopCodes={stopCodes}
