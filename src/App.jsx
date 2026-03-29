@@ -20,7 +20,6 @@ const MUNI_PROXY_BASE = (import.meta.env.VITE_MUNI_API_BASE || "/api/muni").repl
   /\/+$/,
   "",
 );
-const MUNI_PUBLIC_KEY = "0be8ebd0284ce712a63f29dcaf7798c4";
 const POLL_INTERVAL_MS = 30_000;
 const TRAIN_ROUTE_IDS = new Set(["J", "K", "L", "M", "N", "S", "T"]);
 const ROUTE_SWATCHES = {
@@ -31,6 +30,15 @@ const ROUTE_SWATCHES = {
   N: "amber",
   S: "white",
   T: "red",
+};
+const ROUTE_COLORS = {
+  J: { routeColor: "#f28522", routeTextColor: "#111111" },
+  K: { routeColor: "#2979c9", routeTextColor: "#ffffff" },
+  L: { routeColor: "#8f5bbf", routeTextColor: "#ffffff" },
+  M: { routeColor: "#2f8d46", routeTextColor: "#ffffff" },
+  N: { routeColor: "#f2c037", routeTextColor: "#111111" },
+  S: { routeColor: "#f5f5f5", routeTextColor: "#111111" },
+  T: { routeColor: "#c73d4a", routeTextColor: "#ffffff" },
 };
 
 function clampInteger(value, fallback) {
@@ -102,8 +110,7 @@ function getPageFromHash(hash) {
 }
 
 function buildMuniPredictionsUrl(stopCode) {
-  const query = new URLSearchParams({ key: MUNI_PUBLIC_KEY });
-  return `${MUNI_PROXY_BASE}/stopcodes/${encodeURIComponent(stopCode)}/predictions?${query}`;
+  return `${MUNI_PROXY_BASE}/stopcodes/${encodeURIComponent(stopCode)}/predictions`;
 }
 
 function normalizeStopCode(value) {
@@ -138,32 +145,103 @@ function isTrainPrediction(group) {
   return TRAIN_ROUTE_IDS.has(group?.route?.id);
 }
 
-function normalizeTrainTrips(groups) {
-  return groups
-    .filter((group) => isTrainPrediction(group))
-    .flatMap((group) =>
-      (group.values ?? [])
-        .filter((prediction) => prediction.direction && prediction.minutes >= 0)
-        .map((prediction) => ({
-          id: [
-            group.route.id,
-            prediction.direction.id,
-            prediction.tripId,
-            prediction.minutes,
-          ].join(":"),
-          routeId: group.route.id,
-          routeTitle: group.route.title,
-          routeColor: `#${group.route.color ?? "bf2b45"}`,
-          routeTextColor: `#${group.route.textColor ?? "ffffff"}`,
-          stopName: group.stop.name,
-          stopCode: group.stop.code,
-          destination: prediction.direction.destinationName || prediction.direction.name,
-          minutes: prediction.minutes,
-          occupancy: prediction.occupancyDescription,
-          vehicleId: prediction.vehicleId,
-          affectedByLayover: prediction.affectedByLayover,
-        })),
-    )
+function get511Deliveries(payload) {
+  const delivery = payload?.ServiceDelivery?.StopMonitoringDelivery;
+
+  if (Array.isArray(delivery)) {
+    return delivery;
+  }
+
+  return delivery ? [delivery] : [];
+}
+
+function parseIsoTimestamp(value) {
+  if (!value) {
+    return Number.NaN;
+  }
+
+  return Date.parse(value);
+}
+
+function humanizeOccupancy(value) {
+  if (!value) {
+    return "";
+  }
+
+  return String(value)
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/^./, (char) => char.toUpperCase());
+}
+
+function parse511StopResult(payload, requestedStopCode) {
+  const deliveries = get511Deliveries(payload);
+  const visits = deliveries.flatMap((delivery) => delivery?.MonitoredStopVisit ?? []);
+  const responseTimestamp =
+    parseIsoTimestamp(payload?.ServiceDelivery?.ResponseTimestamp) || Date.now();
+  const firstCall =
+    visits[0]?.MonitoredVehicleJourney?.MonitoredCall ??
+    visits[0]?.MonitoredVehicleJourney?.OnwardCalls?.OnwardCall?.[0] ??
+    null;
+  const stop = {
+    code: String(firstCall?.StopPointRef ?? requestedStopCode),
+    name: firstCall?.StopPointName || `Stop #${requestedStopCode}`,
+  };
+
+  const trips = visits
+    .map((visit) => {
+      const journey = visit?.MonitoredVehicleJourney;
+      const monitoredCall =
+        journey?.MonitoredCall ?? journey?.OnwardCalls?.OnwardCall?.[0] ?? null;
+      const routeId = String(journey?.LineRef ?? "").trim().toUpperCase();
+
+      if (!TRAIN_ROUTE_IDS.has(routeId) || !monitoredCall) {
+        return null;
+      }
+
+      const expectedTime =
+        monitoredCall.ExpectedArrivalTime ||
+        monitoredCall.AimedArrivalTime ||
+        monitoredCall.ExpectedDepartureTime ||
+        monitoredCall.AimedDepartureTime;
+      const arrivalTimestamp = parseIsoTimestamp(expectedTime);
+
+      if (!Number.isFinite(arrivalTimestamp)) {
+        return null;
+      }
+
+      const minutes = Math.max(0, Math.ceil((arrivalTimestamp - responseTimestamp) / 60_000));
+      const routeColors = ROUTE_COLORS[routeId] ?? {
+        routeColor: "#bf2b45",
+        routeTextColor: "#ffffff",
+      };
+      const destination =
+        monitoredCall.DestinationDisplay ||
+        journey?.DestinationName ||
+        monitoredCall.StopPointName ||
+        journey?.PublishedLineName ||
+        routeId;
+
+      return {
+        id: [
+          routeId,
+          journey?.DirectionRef ?? "NA",
+          journey?.FramedVehicleJourneyRef?.DatedVehicleJourneyRef ?? journey?.VehicleRef ?? "NA",
+          minutes,
+        ].join(":"),
+        routeId,
+        routeTitle: journey?.PublishedLineName || routeId,
+        routeColor: routeColors.routeColor,
+        routeTextColor: routeColors.routeTextColor,
+        stopName: stop.name,
+        stopCode: stop.code,
+        destination,
+        minutes,
+        occupancy: humanizeOccupancy(journey?.Occupancy),
+        vehicleId: journey?.VehicleRef || "",
+        affectedByLayover: false,
+      };
+    })
+    .filter(Boolean)
     .sort((left, right) => left.minutes - right.minutes)
     .filter(
       (trip, index, collection) =>
@@ -174,6 +252,12 @@ function normalizeTrainTrips(groups) {
             candidate.minutes === trip.minutes,
         ) === index,
     );
+
+  return {
+    stop,
+    trips,
+    fetchedAt: responseTimestamp,
+  };
 }
 
 function formatMinutes(minutes) {
@@ -307,25 +391,18 @@ function useMuniTrainPredictions(initialStopCode = DEFAULT_STOP_CODE) {
       const response = await fetch(buildMuniPredictionsUrl(stopCode));
 
       if (!response.ok) {
-        throw new Error(`SFMTA returned ${response.status}`);
+        throw new Error(`Transit API returned ${response.status}`);
       }
 
       const payload = await response.json();
-      const stop = payload[0]?.stop ?? {
-        code: stopCode,
-        name: `Stop #${stopCode}`,
-      };
+      const parsedResult = parse511StopResult(payload, stopCode);
 
-      setResult({
-        stop,
-        trips: normalizeTrainTrips(payload),
-        fetchedAt: Date.now(),
-      });
+      setResult(parsedResult);
       setStatus("success");
     } catch (fetchError) {
       setStatus("error");
       setError(
-        "Live ETAs could not be loaded. Run the app through the local Vite server so the Muni proxy can reach the realtime feed.",
+        "Live ETAs could not be loaded. Point the app at the Vercel 511 proxy or configure the local 511 dev proxy token.",
       );
       console.error(fetchError);
     } finally {
@@ -414,21 +491,16 @@ function useMultiMuniTrainPredictions(initialStopCodes) {
           const response = await fetch(buildMuniPredictionsUrl(stopCode));
 
           if (!response.ok) {
-            throw new Error(`SFMTA returned ${response.status} for stop ${stopCode}`);
+            throw new Error(`Transit API returned ${response.status} for stop ${stopCode}`);
           }
 
           const payload = await response.json();
-          const stop = payload[0]?.stop ?? {
-            code: stopCode,
-            name: `Stop #${stopCode}`,
-          };
+          const parsedResult = parse511StopResult(payload, stopCode);
 
           return [
             stopCode,
             {
-              stop,
-              trips: normalizeTrainTrips(payload),
-              fetchedAt: Date.now(),
+              ...parsedResult,
               error: "",
             },
           ];
@@ -441,7 +513,7 @@ function useMultiMuniTrainPredictions(initialStopCodes) {
     } catch (fetchError) {
       setStatus("error");
       setError(
-        "Live ETAs could not be loaded. Run the app through the local Vite server so the Muni proxy can reach the realtime feed.",
+        "Live ETAs could not be loaded. Point the app at the Vercel 511 proxy or configure the local 511 dev proxy token.",
       );
       setResultsByStop((current) =>
         Object.fromEntries(
