@@ -23,7 +23,8 @@ https://api.511.org/transit/StopMonitoring?agency=SF&stopcode=:stopCode&format=j
 1. Create a new Vercel project from this repo.
 2. Set the root directory to `vercel-proxy`.
 3. Add environment variable `API_511_TOKEN`.
-4. Deploy.
+4. Leave build and output settings empty.
+5. Deploy.
 
 After deploy, use the resulting base URL in the frontend as:
 
